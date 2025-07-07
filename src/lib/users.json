@@ -1,0 +1,16 @@
+[
+  {
+    "id": "a4bbf704-ab8d-4662-8f37-f6cf48ef9fcb",
+    "username": "Astroman",
+    "email": "astroman6569@gmail.com",
+    "userType": "admin",
+    "passwordHash": "$2a$10$7sQ95BaTB7d3k7cjdVTbo.MqA1ZsiR7tKzTgzNf9zsWMykBLpxAem"
+  },
+  {
+    "id": "a454494f-a7de-4e94-b8a2-48d1f92a6e51",
+    "username": "Shikharji",
+    "email": "srishikharji@gmail.com",
+    "userType": "user",
+    "passwordHash": "$2a$10$j6GAxvzUh.Buw0ns/UKOT.yyVcb1O52KsYmF6cZmsd/XtSWIZCYPK"
+  }
+]
