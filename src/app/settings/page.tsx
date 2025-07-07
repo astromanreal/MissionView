@@ -5,16 +5,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Settings as SettingsIcon, Construction, Palette, BellRing } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import type { Metadata } from 'next';
-
-export const metadata: Metadata = {
-  title: 'Settings',
-  description: 'Customize your MissionView experience. Adjust theme and notification preferences.',
-  robots: {
-    index: false,
-    follow: false,
-  },
-};
 
 export default function SettingsPage() {
   return (

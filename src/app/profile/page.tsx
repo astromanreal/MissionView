@@ -20,16 +20,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import type { Metadata } from 'next';
-
-export const metadata: Metadata = {
-  title: 'Your Profile',
-  description: 'Manage your MissionView account, view your details, and access account actions.',
-  robots: {
-    index: false,
-    follow: false,
-  },
-};
 
 export default function ProfilePage() {
   const { currentUser, isAuthenticated, logout, deleteAccount } = useAuth();
