@@ -2,12 +2,26 @@
 'use client';
 
 import React, { useState, useEffect, createContext, useContext, useCallback, useMemo, type ReactNode } from 'react';
+import { 
+  getAuth, 
+  onAuthStateChanged,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  deleteUser,
+  type User as FirebaseUser
+} from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+
 import type { CurrentUser, LoginFormData, SignupFormData } from '@/types/auth';
-import { login as loginAction, signup as signupAction, deleteAccount as deleteAccountAction } from '@/app/actions/auth';
+import { auth, db } from '@/lib/firebase';
+import { createUserProfile, deleteUserAccount as deleteAccountAction } from '@/app/actions/auth';
 
 interface AuthContextType {
   currentUser: CurrentUser | null;
+  firebaseUser: FirebaseUser | null;
   isAuthenticated: boolean;
+  loading: boolean;
   isUser: boolean;
   isScientist: boolean;
   isAdmin: boolean;
@@ -23,46 +37,88 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
-  const [isSuperUserAdmin, setIsSuperUserAdmin] = useState(false); // Simple toggle for admin page access
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [isSuperUserAdmin, setIsSuperUserAdmin] = useState(false);
 
   useEffect(() => {
-    // On initial load, try to load user from localStorage
-    try {
-      const storedUser = localStorage.getItem('currentUser');
-      if (storedUser) {
-        setCurrentUser(JSON.parse(storedUser));
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        // User is signed in, see docs for a list of available properties
+        // https://firebase.google.com/docs/reference/js/firebase.User
+        setFirebaseUser(user);
+        // Fetch profile from Firestore
+        const userDocRef = doc(db, 'users', user.uid);
+        const userDoc = await getDoc(userDocRef);
+        if (userDoc.exists()) {
+          const userData = userDoc.data() as Omit<CurrentUser, 'id'>;
+          setCurrentUser({ id: user.uid, ...userData });
+        } else {
+          // This case might happen if Firestore profile creation failed
+          // or user was deleted from DB but not from Auth.
+          // For now, we treat them as a user without a profile.
+          setCurrentUser({ id: user.uid, email: user.email!, username: user.displayName || 'New User', userType: 'user' });
+        }
+      } else {
+        // User is signed out
+        setCurrentUser(null);
+        setFirebaseUser(null);
       }
+      setLoading(false);
+    });
+
+     try {
       const superAdminMode = localStorage.getItem('isSuperUserAdmin') === 'true';
       setIsSuperUserAdmin(superAdminMode);
     } catch (error) {
       console.error("Failed to parse from localStorage", error);
-      localStorage.removeItem('currentUser');
       localStorage.removeItem('isSuperUserAdmin');
     }
+
+    return () => unsubscribe();
   }, []);
 
   const login = useCallback(async (data: LoginFormData) => {
-    const result = await loginAction(data);
-    if (result.success && result.user) {
-      setCurrentUser(result.user);
-      localStorage.setItem('currentUser', JSON.stringify(result.user));
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, data.email, data.password);
+      // onAuthStateChanged will handle setting the user state
+      return { success: true, message: 'Login successful!', user: currentUser! };
+    } catch (error: any) {
+      return { success: false, message: error.message || 'Invalid email or password.' };
     }
-    return result;
-  }, []);
+  }, [currentUser]);
 
   const signup = useCallback(async (data: SignupFormData) => {
-    const result = await signupAction(data);
-    if (result.success && result.user) {
-      // Auto-login the user after successful signup
-      setCurrentUser(result.user);
-      localStorage.setItem('currentUser', JSON.stringify(result.user));
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
+      const user = userCredential.user;
+      
+      const newUserProfile: CurrentUser = {
+        id: user.uid,
+        email: data.email,
+        username: data.username,
+        userType: data.userType,
+      };
+
+      // Create profile in Firestore via Server Action
+      const profileResult = await createUserProfile(newUserProfile);
+
+      if (!profileResult.success) {
+        // If profile creation fails, we should probably delete the auth user
+        // to avoid an inconsistent state.
+        await deleteUser(user);
+        return { success: false, message: `Signup failed: ${profileResult.message}` };
+      }
+      
+      // onAuthStateChanged will handle setting the user state
+      return { success: true, message: 'Account created successfully!', user: newUserProfile };
+    } catch (error: any) {
+      return { success: false, message: error.message || 'Failed to create account.' };
     }
-    return result;
   }, []);
 
   const logout = useCallback(() => {
-    setCurrentUser(null);
-    localStorage.removeItem('currentUser');
+    signOut(auth);
     // Also turn off admin mode on logout
     setIsSuperUserAdmin(false);
     localStorage.setItem('isSuperUserAdmin', 'false');
@@ -71,16 +127,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const deleteAccount = useCallback(async () => {
-    if (!currentUser) {
+    if (!firebaseUser) {
       return { success: false, message: "No user is currently logged in." };
     }
-    const result = await deleteAccountAction(currentUser.id);
+    const result = await deleteAccountAction(firebaseUser.uid);
     if (result.success) {
-      // If deletion is successful on the server, log the user out on the client.
-      logout();
+       // onAuthStateChanged will handle the rest of the client-side cleanup.
     }
     return result;
-  }, [currentUser, logout]);
+  }, [firebaseUser]);
   
   const toggleAdminMode = useCallback(() => {
     setIsSuperUserAdmin(prev => {
@@ -92,7 +147,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const contextValue = useMemo(() => ({
     currentUser,
-    isAuthenticated: !!currentUser,
+    firebaseUser,
+    isAuthenticated: !!currentUser && !!firebaseUser,
+    loading,
     isUser: currentUser?.userType === 'user',
     isScientist: currentUser?.userType === 'scientist',
     isAdmin: currentUser?.userType === 'admin',
@@ -102,7 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     logout,
     toggleAdminMode,
     deleteAccount,
-  }), [currentUser, isSuperUserAdmin, login, signup, logout, toggleAdminMode, deleteAccount]);
+  }), [currentUser, firebaseUser, loading, isSuperUserAdmin, login, signup, logout, toggleAdminMode, deleteAccount]);
 
   return React.createElement(AuthContext.Provider, { value: contextValue }, children);
 }

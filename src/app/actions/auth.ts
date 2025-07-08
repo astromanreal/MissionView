@@ -1,93 +1,57 @@
+
 'use server';
 
-import { promises as fs } from 'fs';
-import path from 'path';
-import bcrypt from 'bcryptjs';
-import type { User, LoginFormData, SignupFormData } from '@/types/auth';
+import { adminDb, adminAuth } from '@/lib/firebase-admin';
+import type { CurrentUser } from '@/types/auth';
 
-const usersFilePath = path.join(process.cwd(), 'src', 'lib', 'users.json');
+const adminNotInitializedError = { success: false, message: 'Firebase Admin not initialized. Check server environment variables.' };
 
-async function readUsers(): Promise<User[]> {
+/**
+ * Creates a user profile document in Firestore after they sign up.
+ */
+export async function createUserProfile(user: CurrentUser) {
+  if (!adminDb) {
+    console.error('Error: Firestore Admin is not initialized.');
+    return adminNotInitializedError;
+  }
+
   try {
-    const data = await fs.readFile(usersFilePath, 'utf-8');
-    // If the file is empty, JSON.parse will fail. Return empty array.
-    if (!data) {
-      return [];
-    }
-    return JSON.parse(data);
+    const { id, ...profileData } = user;
+    await adminDb.collection('users').doc(id).set(profileData);
+    return { success: true, message: 'User profile created successfully.' };
   } catch (error: any) {
-    // If the file doesn't exist, return an empty array
-    if (error.code === 'ENOENT') {
-      return [];
-    }
-    throw error;
+    console.error('Error creating user profile:', error);
+    return { success: false, message: error.message || 'Failed to create user profile.' };
   }
 }
 
-async function writeUsers(users: User[]): Promise<void> {
-  await fs.writeFile(usersFilePath, JSON.stringify(users, null, 2));
-}
-
-export async function signup(data: SignupFormData) {
-  const users = await readUsers();
-
-  const existingUser = users.find(user => user.email === data.email);
-  if (existingUser) {
-    return { success: false, message: 'An account with this email already exists.' };
+/**
+ * Deletes a user from Firebase Authentication and their profile from Firestore.
+ */
+export async function deleteUserAccount(userId: string) {
+  if (!adminDb || !adminAuth) {
+    console.error('Error: Firebase Admin is not initialized.');
+    return adminNotInitializedError;
   }
 
-  // It's crucial to hash passwords, never store them in plain text.
-  const passwordHash = await bcrypt.hash(data.password, 10);
-
-  const newUser: User = {
-    id: crypto.randomUUID(),
-    username: data.username,
-    email: data.email,
-    userType: data.userType,
-    passwordHash: passwordHash,
-  };
-
-  users.push(newUser);
-  await writeUsers(users);
-
-  // Return the user object without the password hash
-  const { passwordHash: _, ...userWithoutPassword } = newUser;
-  return { success: true, message: 'Account created successfully!', user: userWithoutPassword };
-}
-
-
-export async function login(data: LoginFormData) {
-  const users = await readUsers();
-
-  const user = users.find(u => u.email === data.email);
-  if (!user) {
-    return { success: false, message: 'Invalid email or password.' };
-  }
-
-  const isPasswordValid = await bcrypt.compare(data.password, user.passwordHash);
-  if (!isPasswordValid) {
-    return { success: false, message: 'Invalid email or password.' };
-  }
-  
-  // Return the user object without the password hash
-  const { passwordHash, ...userWithoutPassword } = user;
-  return { success: true, message: 'Login successful!', user: userWithoutPassword };
-}
-
-export async function deleteAccount(userId: string) {
   if (!userId) {
     return { success: false, message: 'User ID is required.' };
   }
-  const users = await readUsers();
-  const initialUserCount = users.length;
 
-  const updatedUsers = users.filter(user => user.id !== userId);
+  try {
+    // Delete from Firestore
+    await adminDb.collection('users').doc(userId).delete();
+    
+    // Delete from Firebase Auth
+    await adminAuth.deleteUser(userId);
 
-  if (updatedUsers.length === initialUserCount) {
-    return { success: false, message: 'User not found.' };
+    return { success: true, message: 'Account deleted successfully.' };
+  } catch (error: any) {
+    console.error('Error deleting user account:', error);
+    // Handle case where user might not exist in auth but exists in db, or vice-versa
+    if (error.code === 'auth/user-not-found') {
+        return { success: true, message: 'User already deleted.' };
+    }
+    return { success: false, message: error.message || 'Failed to delete account.' };
   }
-
-  await writeUsers(updatedUsers);
-
-  return { success: true, message: 'Account deleted successfully.' };
 }

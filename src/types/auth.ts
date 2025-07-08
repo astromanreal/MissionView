@@ -19,20 +19,11 @@ export const signupSchema = z.object({
 export type LoginFormData = z.infer<typeof loginSchema>;
 export type SignupFormData = z.infer<typeof signupSchema>;
 
-// This is the full user object, including sensitive data.
-// Should only be used on the server.
-export interface User {
-  id: string;
-  username: string;
-  email: string;
-  userType: 'user' | 'scientist' | 'admin';
-  passwordHash: string; // Store hash, not plain password
-}
 
-// This is the user object that will be stored in the context and localStorage
-// It shouldn't contain the password hash.
+// This is the user profile object that will be stored in Firestore
+// and used throughout the client-side application.
 export interface CurrentUser {
-  id: string;
+  id: string; // This will be the Firebase Auth UID
   username: string;
   email: string;
   userType: 'user' | 'scientist' | 'admin';
