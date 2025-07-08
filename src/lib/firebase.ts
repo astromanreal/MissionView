@@ -1,7 +1,7 @@
 // Import the functions you need from the SDKs you need
-import { initializeApp, getApps } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
+import { getAuth, type Auth } from "firebase/auth";
+import { getFirestore, type Firestore } from "firebase/firestore";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -14,12 +14,33 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-let app;
-if (!getApps().length) {
-  app = initializeApp(firebaseConfig);
+let app: FirebaseApp | null = null;
+let auth: Auth | null = null;
+let db: Firestore | null = null;
+
+// Initialize Firebase only if the API key is provided
+if (firebaseConfig.apiKey) {
+  if (!getApps().length) {
+    try {
+      app = initializeApp(firebaseConfig);
+    } catch (e) {
+      console.error("Firebase initialization error", e);
+    }
+  } else {
+    app = getApps()[0];
+  }
+  
+  if (app) {
+    auth = getAuth(app);
+    db = getFirestore(app);
+  }
 } else {
-  app = getApps()[0];
+  // This warning is useful for local development to know why client features aren't working.
+  if (process.env.NODE_ENV === 'development') {
+      console.warn(
+        'Firebase client SDK not initialized. Missing one or more required environment variables starting with NEXT_PUBLIC_FIREBASE_'
+      );
+  }
 }
 
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+export { auth, db };

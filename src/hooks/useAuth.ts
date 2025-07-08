@@ -3,7 +3,6 @@
 
 import React, { useState, useEffect, createContext, useContext, useCallback, useMemo, type ReactNode } from 'react';
 import { 
-  getAuth, 
   onAuthStateChanged,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -42,25 +41,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isSuperUserAdmin, setIsSuperUserAdmin] = useState(false);
 
   useEffect(() => {
+    // Only set up the listener if Firebase was initialized
+    if (!auth || !db) {
+      setLoading(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        // User is signed in, see docs for a list of available properties
-        // https://firebase.google.com/docs/reference/js/firebase.User
         setFirebaseUser(user);
-        // Fetch profile from Firestore
         const userDocRef = doc(db, 'users', user.uid);
         const userDoc = await getDoc(userDocRef);
         if (userDoc.exists()) {
           const userData = userDoc.data() as Omit<CurrentUser, 'id'>;
           setCurrentUser({ id: user.uid, ...userData });
         } else {
-          // This case might happen if Firestore profile creation failed
-          // or user was deleted from DB but not from Auth.
-          // For now, we treat them as a user without a profile.
           setCurrentUser({ id: user.uid, email: user.email!, username: user.displayName || 'New User', userType: 'user' });
         }
       } else {
-        // User is signed out
         setCurrentUser(null);
         setFirebaseUser(null);
       }
@@ -79,16 +77,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (data: LoginFormData) => {
+    if (!auth || !db) {
+      return { success: false, message: 'Firebase is not configured on this site.' };
+    }
     try {
       const userCredential = await signInWithEmailAndPassword(auth, data.email, data.password);
-      // onAuthStateChanged will handle setting the user state
-      return { success: true, message: 'Login successful!', user: currentUser! };
+      const user = userCredential.user;
+      
+      const userDocRef = doc(db, 'users', user.uid);
+      const userDoc = await getDoc(userDocRef);
+
+      if (userDoc.exists()) {
+        const userData = { id: user.uid, ...userDoc.data() } as CurrentUser;
+        return { success: true, message: 'Login successful!', user: userData };
+      } else {
+        return { success: false, message: 'User profile not found in database.' };
+      }
     } catch (error: any) {
       return { success: false, message: error.message || 'Invalid email or password.' };
     }
-  }, [currentUser]);
+  }, []);
 
   const signup = useCallback(async (data: SignupFormData) => {
+    if (!auth) {
+      return { success: false, message: 'Firebase is not configured on this site.' };
+    }
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
       const user = userCredential.user;
@@ -100,17 +113,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         userType: data.userType,
       };
 
-      // Create profile in Firestore via Server Action
       const profileResult = await createUserProfile(newUserProfile);
 
       if (!profileResult.success) {
-        // If profile creation fails, we should probably delete the auth user
-        // to avoid an inconsistent state.
         await deleteUser(user);
         return { success: false, message: `Signup failed: ${profileResult.message}` };
       }
       
-      // onAuthStateChanged will handle setting the user state
       return { success: true, message: 'Account created successfully!', user: newUserProfile };
     } catch (error: any) {
       return { success: false, message: error.message || 'Failed to create account.' };
@@ -118,11 +127,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
-    signOut(auth);
-    // Also turn off admin mode on logout
+    if (auth) {
+        signOut(auth);
+    }
     setIsSuperUserAdmin(false);
     localStorage.setItem('isSuperUserAdmin', 'false');
-    // Push to login to prevent being on a protected page after logout
     window.location.href = '/login';
   }, []);
 
